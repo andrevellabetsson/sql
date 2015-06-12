@@ -65,53 +65,30 @@ SET @churnperiod = 13
 -------------------------------------------------
 -------------------------------------------------
 
---USE [DataScience]
---GO
-
---CREATE TYPE olmTable AS	TABLE
---(
---					 [x] DECIMAL(8,2),
---					 [y] DECIMAL(8,2) 
---)
-
---ALTER FUNCTION [dbo].[ufn_linearRegresion]
---( 
---	@table olmTABLE READONLY
---)
---RETURNS @olm TABLE
---   (
---		intercept DECIMAL(38, 10),
---		slope DECIMAL(38, 10),
---		r2 DECIMAL(38, 10)
---   )
---AS
---BEGIN
-
---	DECLARE @n int,           
---	@Intercept DECIMAL(38, 10),
---	@Slope DECIMAL(38, 10),
---	@R2 DECIMAL(38, 10)
-
---	SELECT @n=count(*) from @table 
-
---	SELECT
---		@Slope = ((@n * sum(x*y)) - (sum(x)*sum(y)))/ ((@n * sum(Power(x,2)))-Power(Sum(x),2))
---		,@Intercept = avg(y) - ((@n * sum(x*y)) - (sum(x)*sum(y)))/((@n * sum(Power(x,2)))-Power(Sum(x),2)) * avg(x)
---	FROM @table   
-
---	SELECT @R2 = (@Intercept * SUM(Y) + @Slope * SUM(x*y)-SUM(Y)*SUM(y)/@n) / (SUM(y*y) - SUM(Y)* SUM(Y) / @n)
---	FROM @table 
-
---	INSERT INTO @olm SELECT  @Intercept as Intercept, @Slope as Slope, @R2 AS R2
-
---	RETURN 
-
---END
-
-
+DECLARE @olmValues TABLE
+(
+	sk_customer INT PRIMARY KEY,
+	dailyActivity28_7_Slope DECIMAL(15,4),
+	dailyActivity28_7_Intercept DECIMAL(15,4),
+	dailyActivity28_7_R2 DECIMAL(15,4),
+	--dailyActivity21_7_Slope DECIMAL(15,4),
+	--dailyActivity21_7_Intercept DECIMAL(15,4),
+	--dailyActivity21_7_R2 DECIMAL(15,4),
+	--dailyActivity21_14_Slope DECIMAL(15,4),
+	--dailyActivity21_14_Intercept DECIMAL(15,4),
+	--dailyActivity21_14_R2 DECIMAL(15,4),
+	--dailyActivity14_7_Slope DECIMAL(15,4),
+	--dailyActivity14_7_Intercept DECIMAL(15,4),
+	--dailyActivity14_7_R2 DECIMAL(15,4),
+	dailyActivity7_7_Slope DECIMAL(15,4),
+	dailyActivity7_7_Intercept DECIMAL(15,4),
+	dailyActivity7_7_R2 DECIMAL(15,4),
+	dailyActivity3_3_Slope DECIMAL(15,4),
+	dailyActivity3_3_Intercept DECIMAL(15,4),
+	dailyActivity3_3_R2 DECIMAL(15,4)
+)
 
 DECLARE @c INT, @t INT, @cid INT
-
 
 IF OBJECT_ID('tempdb.dbo.#templist', 'U') IS NOT NULL
   DROP TABLE #templist; 
@@ -119,52 +96,80 @@ SELECT ROW_NUMBER() OVER (ORDER BY sk_customer) id, sk_customer INTO #templist F
 --WHERE sk_customer = 1878796
 GROUP BY sk_customer
 
+INSERT INTO @olmValues
+        ( sk_customer 
+        )
+SELECT sk_customer FROM #customerActivity GROUP BY sk_customer
+
 SELECT @c = 1, @t = COUNT(*) FROM #templist
 
-WHILE @c <= 2
+WHILE @c <= 100
 BEGIN
 
-SELECT @cid = sk_customer FROM #templist WHERE id = @c
+	SELECT @cid = sk_customer FROM #templist WHERE id = @c
 
-IF OBJECT_ID('tempdb.dbo.#churnCohort1', 'U') IS NOT NULL
-  DROP TABLE #churnCohort1; 
-SELECT * INTO #churnCohort1  FROM 
-(
-SELECT @cid AS sk_customer, cal.date AS calendarDate, DATEDIFF(DAY,@trainstart,cal.[date])*1.0 AS x, CASE WHEN c.sk_customer IS NOT NULL THEN 1.0 ELSE 0.0 END AS y FROM Marts.Dim.Calendar cal 
-LEFT OUTER JOIN #customerActivity c ON c.calendarDate = cal.[date] AND c.sk_customer = @cid
-WHERE cal.date >= DATEADD(DAY, -@window, @trainStart) AND cal.date < DATEADD(DAY, @churnperiod, @trainStart)  
-) c WHERE c.x BETWEEN -28 AND -22
+	IF OBJECT_ID('tempdb.dbo.#churnCohort1', 'U') IS NOT NULL
+	  DROP TABLE #churnCohort1; 
+	SELECT * INTO #churnCohort1  FROM 
+	(
+	SELECT @cid AS sk_customer, cal.date AS calendarDate, DATEDIFF(DAY,@trainstart,cal.[date])*1.0 AS x, CASE WHEN c.sk_customer IS NOT NULL THEN 1.0 ELSE 0.0 END AS y FROM Marts.Dim.Calendar cal 
+	LEFT OUTER JOIN #customerActivity c ON c.calendarDate = cal.[date] AND c.sk_customer = @cid
+	WHERE cal.date >= DATEADD(DAY, -@window, @trainStart) AND cal.date < DATEADD(DAY, @churnperiod, @trainStart)  
+	) c 
 
-SELECT * FROM #churnCohort1 ORDER BY x
+	DECLARE @table1 olmTable
+	
+	/************* [28,-7] *************/
+	INSERT INTO @table1 SELECT x,y FROM #churnCohort1 WHERE x BETWEEN -28 AND -22 ORDER by x
 
-DECLARE @table1 olmTable
-INSERT INTO @table1 SELECT x,y FROM #churnCohort1 ORDER by x
+	IF ((SELECT SUM(y) FROM @table1) > 0)
+	UPDATE a SET 
+		dailyActivity28_7_Intercept = b.intercept,
+		dailyActivity28_7_Slope = b.slope,
+		dailyActivity28_7_R2 = b.r2
+	FROM @olmValues a
+	INNER JOIN (
+	SELECT @cid AS sk_customer, * FROM [dbo].[ufn_linearRegresion](@table1)) b ON a.sk_customer = b.sk_customer
+	
+	DELETE FROM @table1
 
-SELECT @cid, * FROM [dbo].[ufn_linearRegresion](@table1)
+	/************* [7,-7] *************/
+	INSERT INTO @table1 SELECT x,y FROM #churnCohort1 WHERE x BETWEEN -7 AND -1 ORDER by x
 
---DECLARE @n int,           
---@Intercept DECIMAL(38, 10),
---@Slope DECIMAL(38, 10),
---@R2 DECIMAL(38, 10)
+	IF ((SELECT SUM(y) FROM @table1) > 0)
+	UPDATE a SET 
+		dailyActivity7_7_Intercept = b.intercept,
+		dailyActivity7_7_Slope = b.slope,
+		dailyActivity7_7_R2 = b.r2
+	FROM @olmValues a
+	INNER JOIN (
+	SELECT @cid AS sk_customer, * FROM [dbo].[ufn_linearRegresion](@table1)) b ON a.sk_customer = b.sk_customer
+	
+	DELETE FROM @table1
 
---SELECT @n=count(*) from #churnCohort1 
+	/************* [3,-3] *************/
+	INSERT INTO @table1 SELECT x,y FROM #churnCohort1 WHERE x BETWEEN -3 AND -1 ORDER by x
 
---SELECT
---	@Slope = ((@n * sum(x*y)) - (sum(x)*sum(y)))/ ((@n * sum(Power(x,2)))-Power(Sum(x),2))
---	,@Intercept = avg(y) - ((@n * sum(x*y)) - (sum(x)*sum(y)))/((@n * sum(Power(x,2)))-Power(Sum(x),2)) * avg(x)
---FROM #churnCohort1   
+	IF ((SELECT SUM(y) FROM @table1) > 0)
+	UPDATE a SET 
+		dailyActivity3_3_Intercept = b.intercept,
+		dailyActivity3_3_Slope = b.slope,
+		dailyActivity3_3_R2 = b.r2
+	FROM @olmValues a
+	INNER JOIN (
+	SELECT @cid AS sk_customer, * FROM [dbo].[ufn_linearRegresion](@table1)) b ON a.sk_customer = b.sk_customer
+	
+	DELETE FROM  @table1
 
---SELECT @R2 = (@Intercept * SUM(Y) + @Slope * SUM(x*y)-SUM(Y)*SUM(y)/@n) / (SUM(y*y) - SUM(Y)* SUM(Y) / @n)
---FROM #churnCohort1 
-
---SELECT @Slope as Slope, @Intercept as Intercept, @R2 AS R2
-
-SET @c = @c + 1
+	SET @c = @c + 1
 
 END
 
+	IF OBJECT_ID('tempdb.dbo.#results', 'U') IS NOT NULL
+	  DROP TABLE #results; 
+	SELECT * INTO #results FROM @olmValues 
 
-
+SELECT r.*, bl.churned FROM #results r INNER JOIN #customerChurn bl ON r.sk_customer = bl.sk_customer
 
 
 
